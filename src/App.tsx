@@ -1,8 +1,8 @@
-\import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Send, Bot, Loader2, Lightbulb, Zap, ChevronRight, Scroll, Lock, AlertCircle, FileText } from 'lucide-react';
 
 export default function App() {
-  // === 1. 상태 관리: 인증 및 데이터 ===
+  // === 1. 인증 및 상태 관리 (참조용 코드 구조 반영) ===
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -12,11 +12,11 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [idf, setIdf] = useState({ title: '', problem: '', novelty: '', technical_key: '', effects: '', commercial_value: '', summary: '' });
   const [spec, setSpec] = useState({ title: '', technical_field: '', background: '', problem: '', solution: '', effects: '', claims: [], abstract: '' });
-  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 보안 인증 완료. 아이디어를 입력하면 IDF 분석 후 명세서까지 한 번에 설계합니다.' }]);
+  const [messages, setMessages] = useState([{ role: 'bot', content: '지능형 발명 에이전트가 활성화되었습니다. 아이디어를 입력하여 설계를 시작하세요.' }]);
   const [input, setInput] = useState('');
   const [validModelName, setValidModelName] = useState(null);
 
-  // === 2. 엔진 초기화: 모델 자동 감지 ===
+  // === 2. 엔진 초기화 (인증 완료 후에만 작동) ===
   useEffect(() => {
     if (!isAuthenticated) return;
     const findWorkingModel = async () => {
@@ -30,12 +30,12 @@ export default function App() {
           const targetModel = generateModels.find(m => m.name.includes("flash")) || generateModels[0];
           if (targetModel) setValidModelName(targetModel.name);
         }
-      } catch (error) { console.error("엔진 로드 실패:", error); }
+      } catch (error) { console.error(error); }
     };
     findWorkingModel();
   }, [isAuthenticated]);
 
-  // === 3. 핸들러: 로그인 및 워드 다운로드 ===
+  // === 3. 로그인 핸들러 (참조용 코드와 동일 로직) ===
   const handleLogin = (e) => {
     e.preventDefault();
     if (passwordInput === CORRECT_PASSWORD) {
@@ -49,7 +49,7 @@ export default function App() {
 
   const handleDownload = () => {
     if (!spec.title) { alert("명세서를 먼저 생성해주세요."); return; }
-    const htmlContent = `<html><head><meta charset='utf-8'><style>body{font-family:serif; line-height:1.6; padding:50px;}</style></head><body><h1>【명세서】</h1><h2>【발명의 명칭】</h2><p>${spec.title}</p><h2>【청구범위】</h2>${spec.claims.map((c, i) => `<p>【청구항 ${i+1}】<br/>${c}</p>`).join('')}</body></html>`;
+    const htmlContent = `<html><head><meta charset='utf-8'></head><body style="font-family:serif; padding:50px;"><h1>【명세서】</h1><h2>【발명의 명칭】</h2><p>${spec.title}</p><h2>【청구범위】</h2>${spec.claims.map((c, i) => `<p>【청구항 ${i+1}】<br/>${c}</p>`).join('')}</body></html>`;
     const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -65,7 +65,7 @@ export default function App() {
     } catch (e) { return null; }
   };
 
-  // === 4. 핵심 로직: IDF -> SPEC 전주기 자동 설계 ===
+  // === 4. 핵심 로직: IDF -> SPEC 전주기 자동 설계 (실무 청구항 원칙 반영) ===
   const handleSend = async () => {
     if (!input.trim() || !validModelName) return;
 
@@ -76,9 +76,14 @@ export default function App() {
     setIsGenerating(true);
 
     const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 IDF JSON을 반환하세요. { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
-    const specInstructions = `당신은 20년 경력의 대한민국 특허청 심사관입니다. 다음 IDF 데이터를 바탕으로 법률적 명세서를 설계하세요. 
-    [청구항 제1항 작성 절대 원칙]: 발명의 필수 구성요소를 모두 포함하여 반드시 '하나의 문장'으로 구성하십시오. 
-    JSON 응답: { "title": "명칭", "technical_field": "기술분야", "background": "배경기술", "problem": "과제", "solution": "수단", "effects": "효과", "claims": ["항1", "항2"], "abstract": "요약" }`;
+    
+    // [심사관 청구범위 작성 원칙 반영]
+    const specInstructions = `당신은 20년 경력의 대한민국 특허청 심사관입니다.
+    [청구범위 작성 절대 원칙]:
+    1. 독립항(제1항)은 발명의 필수 구성요소를 모두 포함하여 반드시 '하나의 문장'으로 구성하십시오. (마침표는 끝에 한 번만 사용)
+    2. 결합 관계 명시: 각 구성요소는 유기적으로 연결되어야 하며, 문장 끝은 "...를 포함하는 [발명의 명칭]."으로 끝나야 합니다.
+    3. 종속항: 제2항부터는 "제1항에 있어서, ..."로 시작하여 부가적 특징을 한정하세요.
+    JSON 응답: { "title": "명칭", "technical_field": "기술분야", "background": "배경기술", "problem": "과제", "solution": "수단", "effects": "효과", "claims": ["청구항1", "청구항2"], "abstract": "요약" }`;
 
     try {
       // Step 1: IDF 생성
@@ -91,9 +96,8 @@ export default function App() {
       const idfJson = safeParseJSON(idfData);
       if (!idfJson) throw new Error("분석 구조 오류");
       setIdf(idfJson);
-      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 자동으로 명세서를 설계합니다...` }]);
 
-      // Step 2: SPEC 자동 설계 (Chaining)
+      // Step 2: SPEC 자동 설계
       const specRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -105,7 +109,7 @@ export default function App() {
       if (specJson) {
         setSpec({ ...specJson, claims: Array.isArray(specJson.claims) ? specJson.claims : [specJson.claims] });
         setMode('SPEC');
-        setMessages(prev => [...prev, { role: 'bot', content: `✅ 특허 명세서 설계가 완료되었습니다.` }]);
+        setMessages(prev => [...prev, { role: 'bot', content: `✅ 전주기 설계가 완료되었습니다.` }]);
       }
     } catch (error) {
       setMessages(prev => [...prev, { role: 'bot', content: `❌ 오류: ${error.message}` }]);
@@ -114,7 +118,7 @@ export default function App() {
     }
   };
 
-  // === 5. UI 렌더링: 로그인 화면 ===
+  // === 5. UI 렌더링: 로그인 화면 (참조용 코드 스타일 반영) ===
   if (!isAuthenticated) {
     return (
       <div className="flex min-h-screen w-full bg-slate-100 items-center justify-center font-sans p-4">
@@ -122,7 +126,7 @@ export default function App() {
           <div className="flex flex-col items-center mb-8">
             <div className="bg-indigo-100 p-4 rounded-full mb-4"><Lock size={32} className="text-indigo-700" /></div>
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Invention Agent Pro</h1>
-            <p className="text-slate-500 text-sm mt-2">비밀번호를 입력하여 접속하세요.</p>
+            <p className="text-slate-500 text-sm mt-2 text-center">심사관 전용 시스템입니다.<br/>비밀번호를 입력하여 접속하세요.</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
             <input type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} placeholder="Password" 
@@ -135,10 +139,9 @@ export default function App() {
     );
   }
 
-  // === 6. UI 렌더링: 메인 화면 ===
+  // === 6. UI 렌더링: 메인 화면 (레이아웃 및 넘침 방지 보정 완료) ===
   return (
     <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-      {/* 왼쪽 대화창 */}
       <div className="w-[35%] flex flex-col bg-white border-r shadow-2xl z-20">
         <div className="p-5 bg-indigo-900 text-white flex justify-between items-center shadow-lg">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="font-bold">Invention Agent Pro</h1></div>
@@ -147,10 +150,10 @@ export default function App() {
             <button onClick={() => setMode('SPEC')} className={`px-4 py-1 rounded transition-colors ${mode === 'SPEC' ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400'}`}>SPEC</button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4 bg-slate-50">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`p-3 rounded-2xl text-sm shadow-sm max-w-[85%] break-words ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}`}>{msg.content}</div>
+              <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm break-words ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}`}>{msg.content}</div>
             </div>
           ))}
           {isGenerating && <div className="flex gap-2 text-slate-400 text-xs items-center pl-2"><Loader2 size={14} className="animate-spin"/> 엔진 분석 중...</div>}
@@ -161,16 +164,15 @@ export default function App() {
         </div>
       </div>
 
-      {/* 오른쪽 프리뷰 */}
       <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-200">
         <div className="flex gap-4 mb-8 sticky top-0 z-10 bg-slate-200 py-2 justify-between items-center">
           <div className="flex gap-4 flex-1">
             <button onClick={() => setMode('IDF')} className={`flex-1 p-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'IDF' ? 'border-emerald-500 bg-white text-emerald-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
-              <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic">Step 1</span>
+              <span className="text-[10px] font-black opacity-40 uppercase italic">Step 1</span>
               <div className="flex items-center gap-2 font-black text-sm"><Lightbulb size={18}/> 발명 특정 (IDF)</div>
             </button>
             <button onClick={() => setMode('SPEC')} className={`flex-1 p-4 rounded-xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'SPEC' ? 'border-blue-500 bg-white text-blue-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
-              <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic">Step 2</span>
+              <span className="text-[10px] font-black opacity-40 uppercase italic">Step 2</span>
               <div className="flex items-center gap-2 font-black text-sm"><Zap size={18}/> 권리 보호 (명세서)</div>
             </button>
           </div>
@@ -187,14 +189,14 @@ export default function App() {
               <h2 className="text-3xl font-black text-emerald-900 border-b-8 border-emerald-900 pb-3 italic uppercase tracking-tighter">Invention Disclosure Form</h2>
               <div className="grid grid-cols-2 gap-8">
                 <div className="col-span-2 p-8 bg-slate-50 rounded-xl border-l-[12px] border-emerald-500 shadow-sm"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Title</h3><p className="text-2xl font-bold text-slate-800 leading-tight">{idf.title || "분석 대기 중"}</p></div>
-                <div className="p-8 bg-emerald-50/50 rounded-xl border border-emerald-100"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Core Novelty</h3><p className="text-sm font-medium leading-relaxed">{idf.novelty}</p></div>
+                <div className="p-8 bg-emerald-50/50 rounded-xl border border-emerald-100"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Novelty</h3><p className="text-sm font-medium leading-relaxed">{idf.novelty}</p></div>
                 <div className="p-8 bg-blue-50/50 rounded-xl border border-blue-100"><h3 className="text-xs font-black text-blue-700 mb-3 uppercase tracking-widest">Value</h3><p className="text-sm font-medium leading-relaxed">{idf.commercial_value}</p></div>
                 <div className="col-span-2 p-8 border border-slate-200 rounded-xl bg-white shadow-inner"><h3 className="text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Technical Implementation</h3><p className="text-sm whitespace-pre-wrap leading-loose text-slate-700">{idf.technical_key}</p></div>
               </div>
             </div>
           ) : (
             <div className="space-y-8 animate-in fade-in duration-700">
-              <h1 className="text-2xl font-bold mb-10 border-b-2 border-slate-900 pb-2 text-center uppercase tracking-widest tracking-tighter">【특허 명세서】</h1>
+              <h1 className="text-2xl font-bold mb-10 border-b-2 border-slate-900 pb-2 text-center uppercase tracking-widest">【특허 명세서】</h1>
               <div className="space-y-6">
                 <div className="flex gap-4"><span className="font-bold text-slate-900 shrink-0 min-w-[100px]">【명칭】</span><p className="text-indigo-900 font-black">{spec.title}</p></div>
                 <div className="flex flex-col gap-2"><span className="font-bold text-slate-900">【해결하려는 과제】</span><p className="text-sm text-slate-700 leading-relaxed pl-4 border-l-2 border-slate-100 whitespace-pre-wrap break-words">{spec.problem}</p></div>
