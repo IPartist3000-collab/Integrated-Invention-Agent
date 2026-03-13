@@ -7,7 +7,7 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
   const CORRECT_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
-
+ 
   const [mode, setMode] = useState('IDF'); 
   const [isGenerating, setIsGenerating] = useState(false);
   const [idf, setIdf] = useState({ title: '', problem: '', novelty: '', technical_key: '', effects: '', commercial_value: '', summary: '' });
