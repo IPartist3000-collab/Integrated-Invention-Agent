@@ -6,10 +6,11 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [idf, setIdf] = useState({ title: '', problem: '', novelty: '', technical_key: '', effects: '', commercial_value: '', summary: '' });
   const [spec, setSpec] = useState({ title: '', technical_field: '', background: '', problem: '', solution: '', effects: '', claims: [], abstract: '' });
-  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 엔진 연결 성공! 아이디어를 입력하면 IDF 분석 후 명세서까지 자동으로 설계합니다.' }]);
+  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 엔진 연결 성공! 아이디어를 입력하면 IDF 분석 후 명세서까지 한 번에 자동 설계합니다.' }]);
   const [input, setInput] = useState('');
   const [validModelName, setValidModelName] = useState(null);
 
+  // 엔진 체크 로직 (불변)
   useEffect(() => {
     const findWorkingModel = async () => {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -27,7 +28,7 @@ export default function App() {
     findWorkingModel();
   }, []);
 
-  // === 핵심 수정: 전자동 연쇄 호출 로직 ===
+  // === 핵심 수정: IDF 완료 후 SPEC 자동 작성을 위한 논리 구조 ===
   const handleSend = async () => {
     if (!input.trim() || !validModelName) return;
 
@@ -37,10 +38,8 @@ export default function App() {
     setInput('');
     setIsGenerating(true);
 
-    // 1단계 프롬프트 (IDF)
-    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요. 기존 데이터가 있다면 업데이트하세요. { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
-    
-    // 2단계 프롬프트 (SPEC)
+    // 프롬프트 설정 (불변)
+    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요: { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
     const specInstructions = `당신은 20년 경력의 대한민국 특허청 심사관입니다. 다음 IDF 데이터를 바탕으로 법률적 명세서를 설계하세요. 반드시 JSON 형식으로 응답하세요: { "title": "명칭", "technical_field": "기술분야", "background": "배경기술", "problem": "과제", "solution": "해결수단", "effects": "효과", "claims": ["청구항1", "청구항2"], "abstract": "요약" }`;
 
     try {
@@ -48,16 +47,17 @@ export default function App() {
       const idfRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n[현재데이터]: ${JSON.stringify(idf)}\n\n[요청]: "${userText}"` }] }] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n입력내용: "${userText}"` }] }] })
       });
       const idfData = await idfRes.json();
       const idfJson = JSON.parse(idfData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
       
+      // IDF 상태 업데이트
       setIdf(idfJson);
-      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 자동으로 명세서를 설계합니다...` }]);
+      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 추출된 정보를 바탕으로 명세서를 작성합니다...` }]);
 
-      // --- [STEP 2: 자동 명세서 생성] ---
-      // IDF 결과가 나오자마자 바로 명세서 API를 호출합니다.
+      // --- [STEP 2: 자동 명세서 생성 (Chaining)] ---
+      // 중요: setIdf가 비동기이므로, 방금 받은 idfJson을 직접 다음 API에 주입합니다.
       const specRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,12 +66,13 @@ export default function App() {
       const specData = await specRes.json();
       const specJson = JSON.parse(specData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
 
+      // SPEC 상태 업데이트 및 자동 모드 전환
       setSpec({ ...specJson, claims: Array.isArray(specJson.claims) ? specJson.claims : [specJson.claims] });
-      setMode('SPEC'); // 화면을 자동으로 명세서 탭으로 전환
-      setMessages(prev => [...prev, { role: 'bot', content: `✅ 특허 명세서 작성이 완료되었습니다.` }]);
+      setMode('SPEC'); // 작성이 완료되면 자동으로 명세서 탭을 보여줍니다.
+      setMessages(prev => [...prev, { role: 'bot', content: `✅ 특허 명세서 설계가 완료되었습니다.` }]);
 
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'bot', content: `❌ 오류: ${error.message}` }]);
+      setMessages(prev => [...prev, { role: 'bot', content: `❌ 오류 발생: ${error.message}` }]);
     } finally {
       setIsGenerating(false);
     }
@@ -81,7 +82,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-      {/* 왼쪽: 대화창 (기존 포맷 유지) */}
+      {/* 왼쪽: 대화창 (불변) */}
       <div className="w-[35%] flex flex-col bg-white border-r shadow-2xl z-20">
         <div className="p-5 bg-indigo-900 text-white flex justify-between items-center shadow-lg">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="font-bold">Invention Agent Pro</h1></div>
@@ -104,12 +105,12 @@ export default function App() {
         </div>
       </div>
 
-      {/* 오른쪽: 문서 프리뷰 (기존 포맷 및 내용 넘침 방지 유지) */}
+      {/* 오른쪽: 문서 프리뷰 (불변 레이아웃) */}
       <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-200">
         <div className="flex gap-4 mb-8 sticky top-0 z-10 bg-slate-200 py-2">
           <button onClick={() => setMode('IDF')} className={`flex-1 p-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'IDF' ? 'border-emerald-500 bg-white text-emerald-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
             <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic font-sans">Step 1</span>
-            <div className="flex items-center gap-2 font-bold text-sm"><Lightbulb size={18}/> 발명 특정 (IDF)</div>
+            <div className="flex items-center gap-2 font-black text-sm"><Lightbulb size={18}/> 발명 특정 (IDF)</div>
           </button>
           <div className="flex items-center">
             {idf.title && <button onClick={linkIdfToSpec} className="bg-emerald-600 text-white p-3 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"><ChevronRight size={24}/></button>}
@@ -120,12 +121,12 @@ export default function App() {
           </button>
         </div>
 
-        <div className="bg-white shadow-2xl p-10 lg:p-16 rounded-xl min-h-screen border border-slate-300 mx-auto w-full max-w-4xl break-words">
+        <div className="bg-white shadow-2xl p-10 lg:p-16 rounded-xl min-h-screen border border-slate-300 mx-auto w-full max-w-4xl break-words relative">
           {mode === 'IDF' ? (
             <div className="space-y-10 animate-in fade-in duration-500">
               <h2 className="text-3xl font-black text-emerald-900 border-b-8 border-emerald-900 pb-3 italic uppercase tracking-tighter">Invention Disclosure Form</h2>
               <div className="grid grid-cols-2 gap-8">
-                <div className="col-span-2 p-8 bg-slate-50 rounded-xl border-l-[12px] border-emerald-500 shadow-sm"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Title of Invention</h3><p className="text-2xl font-bold text-slate-800 leading-tight">{idf.title || "아이디어를 기다리고 있습니다"}</p></div>
+                <div className="col-span-2 p-8 bg-slate-50 rounded-xl border-l-[12px] border-emerald-500 shadow-sm"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Title of Invention</h3><p className="text-2xl font-bold text-slate-800 leading-tight">{idf.title || "분석 대기 중"}</p></div>
                 <div className="p-8 bg-emerald-50/50 rounded-xl border border-emerald-100"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Core Novelty</h3><p className="text-sm font-medium leading-relaxed">{idf.novelty}</p></div>
                 <div className="p-8 bg-blue-50/50 rounded-xl border border-blue-100"><h3 className="text-xs font-black text-blue-700 mb-3 uppercase tracking-widest">Commercial Value</h3><p className="text-sm font-medium leading-relaxed">{idf.commercial_value}</p></div>
                 <div className="col-span-2 p-8 border border-slate-200 rounded-xl bg-white shadow-inner"><h3 className="text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Technical Implementation</h3><p className="text-sm whitespace-pre-wrap leading-loose text-slate-700">{idf.technical_key}</p></div>
