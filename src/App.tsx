@@ -6,7 +6,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [idf, setIdf] = useState({ title: '', problem: '', novelty: '', technical_key: '', effects: '', commercial_value: '', summary: '' });
   const [spec, setSpec] = useState({ title: '', technical_field: '', background: '', problem: '', solution: '', effects: '', claims: [], abstract: '' });
-  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 레이아웃 보정이 완료되었습니다. 아이디어를 입력하면 IDF부터 명세서까지 자동 설계합니다.' }]);
+  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 엔진 연결 성공! 나노 코팅 유리 구슬의 신비로운 살균 현상을 분석할 준비가 되었습니다.' }]);
   const [input, setInput] = useState('');
   const [validModelName, setValidModelName] = useState(null);
 
@@ -27,6 +27,22 @@ export default function App() {
     findWorkingModel();
   }, []);
 
+  // [핵심] API 응답을 안전하게 파싱하는 함수
+  const safeParseJSON = (data) => {
+    try {
+      if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+        throw new Error("API 응답이 비어있습니다. (안전 필터 작동 가능성)");
+      }
+      const rawText = data.candidates[0].content.parts[0].text;
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("JSON 형식을 찾을 수 없습니다.");
+      return JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.error("Parsing Error:", e);
+      return null;
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !validModelName) return;
 
@@ -36,28 +52,34 @@ export default function App() {
     setInput('');
     setIsGenerating(true);
 
-    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요. 기존 데이터가 있다면 업데이트하세요. { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
+    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요. { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
     const specInstructions = `당신은 20년 경력의 대한민국 특허청 심사관입니다. 다음 IDF 데이터를 바탕으로 법률적 명세서를 설계하세요. 반드시 JSON 형식으로 응답하세요: { "title": "명칭", "technical_field": "기술분야", "background": "배경기술", "problem": "과제", "solution": "해결수단", "effects": "효과", "claims": ["청구항1", "청구항2"], "abstract": "요약" }`;
 
     try {
+      // --- [STEP 1: IDF 생성] ---
       const idfRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n[현재데이터]: ${JSON.stringify(idf)}\n\n[요청]: "${userText}"` }] }] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n[입력]: "${userText}"` }] }] })
       });
       const idfData = await idfRes.json();
-      const idfJson = JSON.parse(idfData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
+      const idfJson = safeParseJSON(idfData);
+      
+      if (!idfJson) throw new Error("IDF 분석 중 응답 오류가 발생했습니다.");
       
       setIdf(idfJson);
-      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 추출된 정보를 바탕으로 명세서를 작성합니다...` }]);
+      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 추출된 정보를 바탕으로 명세서를 자동 설계합니다...` }]);
 
+      // --- [STEP 2: 자동 명세서 생성] ---
       const specRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: `${specInstructions}\n\n[대상 IDF 데이터]: ${JSON.stringify(idfJson)}` }] }] })
       });
       const specData = await specRes.json();
-      const specJson = JSON.parse(specData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
+      const specJson = safeParseJSON(specData);
+
+      if (!specJson) throw new Error("명세서 설계 중 응답 오류가 발생했습니다.");
 
       setSpec({ ...specJson, claims: Array.isArray(specJson.claims) ? specJson.claims : [specJson.claims] });
       setMode('SPEC'); 
@@ -74,7 +96,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-      {/* 1. 왼쪽: 지능형 대화창 */}
+      {/* 1. 왼쪽: 대화창 */}
       <div className="w-[35%] flex flex-col bg-white border-r shadow-2xl z-20">
         <div className="p-5 bg-indigo-900 text-white flex justify-between items-center shadow-lg">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="font-bold">Invention Agent Pro</h1></div>
@@ -89,7 +111,7 @@ export default function App() {
               <div className={`p-3 rounded-2xl text-sm shadow-sm max-w-[85%] break-words ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}`}>{msg.content}</div>
             </div>
           ))}
-          {isGenerating && <div className="flex gap-2 text-slate-400 text-xs items-center pl-2"><Loader2 size={14} className="animate-spin"/> AI가 전주기 설계 중...</div>}
+          {isGenerating && <div className="flex gap-2 text-slate-400 text-xs items-center pl-2"><Loader2 size={14} className="animate-spin"/> 엔진 분석 중...</div>}
         </div>
         <div className="p-4 border-t bg-white flex gap-2">
           <input className="flex-1 p-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder="아이디어를 입력하세요..." disabled={!validModelName || isGenerating} />
@@ -97,7 +119,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 2. 오른쪽: 문서 프리뷰 영역 (내용 이탈 보정 완료) */}
+      {/* 2. 오른쪽: 문서 프리뷰 영역 (내용 이탈 보정 유지) */}
       <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-200">
         <div className="flex gap-4 mb-8 sticky top-0 z-10 bg-slate-200 py-2">
           <button onClick={() => setMode('IDF')} className={`flex-1 p-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'IDF' ? 'border-emerald-500 bg-white text-emerald-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
@@ -113,7 +135,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* [중요] break-words를 추가하여 종이 밖 이탈 방지 */}
         <div className="bg-white shadow-2xl p-10 lg:p-16 rounded-xl min-h-screen border border-slate-300 mx-auto w-full max-w-4xl break-words relative">
           {mode === 'IDF' ? (
             <div className="space-y-10 animate-in fade-in duration-500">
@@ -141,7 +162,6 @@ export default function App() {
                     </div> 
                   ))}
                 </div>
-                <div className="flex flex-col gap-2 pt-6 border-t border-slate-100"><span className="font-bold text-slate-900 font-bold">【요약】</span><p className="text-sm text-slate-600 leading-relaxed pl-4 break-words whitespace-pre-wrap">{spec.abstract}</p></div>
               </div>
             </div>
           )}
