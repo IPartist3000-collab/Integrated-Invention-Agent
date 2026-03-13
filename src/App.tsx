@@ -6,10 +6,11 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [idf, setIdf] = useState({ title: '', problem: '', novelty: '', technical_key: '', effects: '', commercial_value: '', summary: '' });
   const [spec, setSpec] = useState({ title: '', technical_field: '', background: '', problem: '', solution: '', effects: '', claims: [], abstract: '' });
-  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 엔진 연결 성공! 나노 코팅 유리 구슬의 신비로운 살균 현상을 분석할 준비가 되었습니다.' }]);
+  const [messages, setMessages] = useState([{ role: 'bot', content: '✅ 엔진 연결 성공! 아이디어를 입력하면 IDF 분석 후 명세서까지 한 번에 자동 설계합니다.' }]);
   const [input, setInput] = useState('');
   const [validModelName, setValidModelName] = useState(null);
 
+  // 엔진 체크 로직 (불변)
   useEffect(() => {
     const findWorkingModel = async () => {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -27,22 +28,7 @@ export default function App() {
     findWorkingModel();
   }, []);
 
-  // [핵심] API 응답을 안전하게 파싱하는 함수
-  const safeParseJSON = (data) => {
-    try {
-      if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-        throw new Error("API 응답이 비어있습니다. (안전 필터 작동 가능성)");
-      }
-      const rawText = data.candidates[0].content.parts[0].text;
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("JSON 형식을 찾을 수 없습니다.");
-      return JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      console.error("Parsing Error:", e);
-      return null;
-    }
-  };
-
+  // === 핵심 수정: IDF 완료 후 SPEC 자동 작성을 위한 논리 구조 ===
   const handleSend = async () => {
     if (!input.trim() || !validModelName) return;
 
@@ -52,7 +38,8 @@ export default function App() {
     setInput('');
     setIsGenerating(true);
 
-    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요. { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
+    // 프롬프트 설정 (불변)
+    const idfPrompt = `당신은 전문 IP 컨설턴트입니다. 다음 아이디어를 분석하여 반드시 JSON 형식으로만 응답하세요: { "title": "명칭", "problem": "기존 한계", "novelty": "핵심 신규성", "technical_key": "구현 방법", "effects": "효과", "commercial_value": "상업성", "summary": "요약" }`;
     const specInstructions = `당신은 20년 경력의 대한민국 특허청 심사관입니다. 다음 IDF 데이터를 바탕으로 법률적 명세서를 설계하세요. 반드시 JSON 형식으로 응답하세요: { "title": "명칭", "technical_field": "기술분야", "background": "배경기술", "problem": "과제", "solution": "해결수단", "effects": "효과", "claims": ["청구항1", "청구항2"], "abstract": "요약" }`;
 
     try {
@@ -60,33 +47,32 @@ export default function App() {
       const idfRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n[입력]: "${userText}"` }] }] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: `${idfPrompt}\n\n입력내용: "${userText}"` }] }] })
       });
       const idfData = await idfRes.json();
-      const idfJson = safeParseJSON(idfData);
+      const idfJson = JSON.parse(idfData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
       
-      if (!idfJson) throw new Error("IDF 분석 중 응답 오류가 발생했습니다.");
-      
+      // IDF 상태 업데이트
       setIdf(idfJson);
-      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 추출된 정보를 바탕으로 명세서를 자동 설계합니다...` }]);
+      setMessages(prev => [...prev, { role: 'bot', content: `✅ IDF 분석 완료. 추출된 정보를 바탕으로 명세서를 작성합니다...` }]);
 
-      // --- [STEP 2: 자동 명세서 생성] ---
+      // --- [STEP 2: 자동 명세서 생성 (Chaining)] ---
+      // 중요: setIdf가 비동기이므로, 방금 받은 idfJson을 직접 다음 API에 주입합니다.
       const specRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${validModelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: `${specInstructions}\n\n[대상 IDF 데이터]: ${JSON.stringify(idfJson)}` }] }] })
       });
       const specData = await specRes.json();
-      const specJson = safeParseJSON(specData);
+      const specJson = JSON.parse(specData.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)[0]);
 
-      if (!specJson) throw new Error("명세서 설계 중 응답 오류가 발생했습니다.");
-
+      // SPEC 상태 업데이트 및 자동 모드 전환
       setSpec({ ...specJson, claims: Array.isArray(specJson.claims) ? specJson.claims : [specJson.claims] });
-      setMode('SPEC'); 
+      setMode('SPEC'); // 작성이 완료되면 자동으로 명세서 탭을 보여줍니다.
       setMessages(prev => [...prev, { role: 'bot', content: `✅ 특허 명세서 설계가 완료되었습니다.` }]);
 
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'bot', content: `❌ 오류: ${error.message}` }]);
+      setMessages(prev => [...prev, { role: 'bot', content: `❌ 오류 발생: ${error.message}` }]);
     } finally {
       setIsGenerating(false);
     }
@@ -96,7 +82,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-      {/* 1. 왼쪽: 대화창 */}
+      {/* 왼쪽: 대화창 (불변) */}
       <div className="w-[35%] flex flex-col bg-white border-r shadow-2xl z-20">
         <div className="p-5 bg-indigo-900 text-white flex justify-between items-center shadow-lg">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="font-bold">Invention Agent Pro</h1></div>
@@ -111,7 +97,7 @@ export default function App() {
               <div className={`p-3 rounded-2xl text-sm shadow-sm max-w-[85%] break-words ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}`}>{msg.content}</div>
             </div>
           ))}
-          {isGenerating && <div className="flex gap-2 text-slate-400 text-xs items-center pl-2"><Loader2 size={14} className="animate-spin"/> 엔진 분석 중...</div>}
+          {isGenerating && <div className="flex gap-2 text-slate-400 text-xs items-center pl-2"><Loader2 size={14} className="animate-spin"/> AI가 전주기 설계 중...</div>}
         </div>
         <div className="p-4 border-t bg-white flex gap-2">
           <input className="flex-1 p-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder="아이디어를 입력하세요..." disabled={!validModelName || isGenerating} />
@@ -119,18 +105,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* 2. 오른쪽: 문서 프리뷰 영역 (내용 이탈 보정 유지) */}
+      {/* 오른쪽: 문서 프리뷰 (불변 레이아웃) */}
       <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-200">
         <div className="flex gap-4 mb-8 sticky top-0 z-10 bg-slate-200 py-2">
           <button onClick={() => setMode('IDF')} className={`flex-1 p-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'IDF' ? 'border-emerald-500 bg-white text-emerald-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
-            <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic">Step 1</span>
-            <div className="flex items-center gap-2 font-bold text-sm"><Lightbulb size={18}/> 발명 특정 (IDF)</div>
+            <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic font-sans">Step 1</span>
+            <div className="flex items-center gap-2 font-black text-sm"><Lightbulb size={18}/> 발명 특정 (IDF)</div>
           </button>
           <div className="flex items-center">
             {idf.title && <button onClick={linkIdfToSpec} className="bg-emerald-600 text-white p-3 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"><ChevronRight size={24}/></button>}
           </div>
           <button onClick={() => setMode('SPEC')} className={`flex-1 p-4 rounded-xl border-2 flex flex-col items-center gap-1 transition-all ${mode === 'SPEC' ? 'border-blue-500 bg-white text-blue-700 shadow-xl scale-[1.01]' : 'bg-slate-50/80 text-slate-400 border-transparent'}`}>
-            <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic">Step 2</span>
+            <span className="text-[10px] font-black opacity-40 uppercase tracking-widest italic font-sans">Step 2</span>
             <div className="flex items-center gap-2 font-black text-sm"><Zap size={18}/> 권리 보호 (명세서)</div>
           </button>
         </div>
@@ -140,25 +126,25 @@ export default function App() {
             <div className="space-y-10 animate-in fade-in duration-500">
               <h2 className="text-3xl font-black text-emerald-900 border-b-8 border-emerald-900 pb-3 italic uppercase tracking-tighter">Invention Disclosure Form</h2>
               <div className="grid grid-cols-2 gap-8">
-                <div className="col-span-2 p-8 bg-slate-50 rounded-xl border-l-[12px] border-emerald-500 shadow-sm"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Title of Invention</h3><p className="text-2xl font-bold text-slate-800 leading-tight break-words">{idf.title || "분석 대기 중"}</p></div>
-                <div className="p-8 bg-emerald-50/50 rounded-xl border border-emerald-100"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Core Novelty</h3><p className="text-sm font-medium leading-relaxed break-words">{idf.novelty}</p></div>
-                <div className="p-8 bg-blue-50/50 rounded-xl border border-blue-100"><h3 className="text-xs font-black text-blue-700 mb-3 uppercase tracking-widest">Commercial Value</h3><p className="text-sm font-medium leading-relaxed break-words">{idf.commercial_value}</p></div>
-                <div className="col-span-2 p-8 border border-slate-200 rounded-xl bg-white shadow-inner"><h3 className="text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Technical Implementation</h3><p className="text-sm whitespace-pre-wrap break-words leading-loose text-slate-700">{idf.technical_key}</p></div>
+                <div className="col-span-2 p-8 bg-slate-50 rounded-xl border-l-[12px] border-emerald-500 shadow-sm"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Title of Invention</h3><p className="text-2xl font-bold text-slate-800 leading-tight">{idf.title || "분석 대기 중"}</p></div>
+                <div className="p-8 bg-emerald-50/50 rounded-xl border border-emerald-100"><h3 className="text-xs font-black text-emerald-700 mb-3 uppercase tracking-widest">Core Novelty</h3><p className="text-sm font-medium leading-relaxed">{idf.novelty}</p></div>
+                <div className="p-8 bg-blue-50/50 rounded-xl border border-blue-100"><h3 className="text-xs font-black text-blue-700 mb-3 uppercase tracking-widest">Commercial Value</h3><p className="text-sm font-medium leading-relaxed">{idf.commercial_value}</p></div>
+                <div className="col-span-2 p-8 border border-slate-200 rounded-xl bg-white shadow-inner"><h3 className="text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Technical Implementation</h3><p className="text-sm whitespace-pre-wrap leading-loose text-slate-700">{idf.technical_key}</p></div>
               </div>
             </div>
           ) : (
             <div className="space-y-8 animate-in fade-in duration-700">
               <h1 className="text-2xl font-bold mb-10 border-b-2 border-slate-900 pb-2 text-center uppercase tracking-[0.2em]">【특허 명세서】</h1>
               <div className="space-y-6">
-                <div className="flex gap-4"><span className="font-bold text-slate-900 shrink-0 min-w-[100px]">【명칭】</span><p className="text-indigo-900 font-black break-words">{spec.title}</p></div>
-                <div className="flex flex-col gap-2"><span className="font-bold text-slate-900">【해결하려는 과제】</span><p className="text-sm text-slate-700 leading-relaxed pl-4 border-l-2 border-slate-100 break-words whitespace-pre-wrap">{spec.problem}</p></div>
-                <div className="flex flex-col gap-2"><span className="font-bold text-slate-900">【과제의 해결수단】</span><p className="text-sm text-slate-700 leading-relaxed pl-4 border-l-2 border-slate-100 break-words whitespace-pre-wrap">{spec.solution}</p></div>
+                <div className="flex gap-4"><span className="font-bold text-slate-900 shrink-0 min-w-[100px]">【명칭】</span><p className="text-indigo-900 font-black">{spec.title}</p></div>
+                <div className="flex flex-col gap-2"><span className="font-bold text-slate-900">【해결하려는 과제】</span><p className="text-sm text-slate-700 leading-relaxed pl-4 border-l-2 border-slate-100">{spec.problem}</p></div>
+                <div className="flex flex-col gap-2"><span className="font-bold text-slate-900">【과제의 해결수단】</span><p className="text-sm text-slate-700 leading-relaxed pl-4 border-l-2 border-slate-100">{spec.solution}</p></div>
                 <div className="mt-12 p-8 bg-red-50/20 border-2 border-red-100 rounded-2xl shadow-inner">
                   <h3 className="font-black text-red-800 mb-6 flex items-center gap-2"><Scroll size={20}/> 【특허청구범위】</h3>
                   {spec.claims.map((c, i) => ( 
                     <div key={i} className="mb-6 last:mb-0">
                       <h4 className="font-black text-xs text-red-600 mb-2 underline decoration-red-200 underline-offset-4 tracking-widest">【청구항 {i+1}】</h4>
-                      <p className="text-sm pl-4 leading-8 text-slate-800 border-l-2 border-red-100 font-medium break-words whitespace-pre-wrap text-justify">{c}</p>
+                      <p className="text-sm pl-4 leading-8 text-slate-800 border-l-2 border-red-100 font-medium">{c}</p>
                     </div> 
                   ))}
                 </div>
