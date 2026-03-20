@@ -39,11 +39,7 @@ export default function App() {
     if (!isAuthenticated) return;
     const checkAndFindModel = async () => {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey || !apiKey.startsWith("AIza")) {
-        setApiKeyStatus("fail");
-        return;
-      }
-      setApiKeyStatus("success");
+      if (!apiKey || !apiKey.startsWith("AIza")) return;
       try {
         const listResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
         const listData = await listResponse.json();
@@ -60,7 +56,6 @@ export default function App() {
     e.preventDefault();
     if (passwordInput === CORRECT_PASSWORD) {
       setIsAuthenticated(true);
-      setLoginError(false);
     } else {
       setLoginError(true);
       setPasswordInput('');
@@ -70,8 +65,7 @@ export default function App() {
   const cleanText = (data) => {
     if (!data) return "";
     if (typeof data === 'string') return data;
-    if (typeof data === 'object') return data.text || data.content || JSON.stringify(data);
-    return String(data);
+    return data.text || data.content || JSON.stringify(data);
   };
 
   const cleanClaim = (data) => {
@@ -93,16 +87,24 @@ export default function App() {
     });
   };
 
+  // 📎 파일 업로드 확인 메시지 복구
   const handleFileChange = (e) => {
     const file = e.target.files[0];
-    if (file) setAttachedFile(file);
+    if (file) {
+      setAttachedFile(file);
+      setMessages(prev => [...prev, { role: 'bot', content: `📎 분석용 파일 [${file.name}] 준비 완료.` }]);
+    }
   };
 
+  // 🖼️ 도면 업로드 확인 메시지 복구
   const handleDrawingUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => setDrawings(prev => [...prev, { id: Date.now(), src: event.target.result, name: file.name }]);
+      reader.onload = (event) => {
+        setDrawings(prev => [...prev, { id: Date.now(), src: event.target.result, name: file.name }]);
+        setMessages(prev => [...prev, { role: 'bot', content: `🖼️ 도면 [${file.name}] 추가됨.` }]);
+      };
       reader.readAsDataURL(file);
     }
   };
@@ -130,7 +132,6 @@ export default function App() {
     const abstractText = cleanText(spec.abstract);
 
     let claimsHtml = Array.isArray(spec.claims) ? spec.claims.map((c, i) => `<p style='font-weight:bold;'>【청구항 ${i+1}】</p><div class="indent" style='margin-left:30pt; margin-bottom:15pt;'>${cleanText(c)}</div>`).join('') : "";
-
     let drawingsHtml = drawings.length > 0 ? drawings.map((d, i) => `<p style='text-align:center; font-weight:bold; margin-top:30pt;'>【도 ${i+1}】</p><div style="text-align:center; margin:15pt 0;"><img src="${d.src}" width="450" style="border:0.5pt solid #cccccc;"/></div>`).join('') : "";
     if (drawingsHtml) drawingsHtml = `<br clear='all' style='page-break-before:always'/><p style='font-size:14pt; font-weight:bold; border-bottom:1pt solid black;'>【도면】</p>${drawingsHtml}`;
 
@@ -156,7 +157,7 @@ export default function App() {
     }
   };
 
-  // === 메인 생성 및 정제 로직 (에러 해결 지점) ===
+  // === 메인 생성 로직 ===
   const handleSend = async (customPrompt = null) => {
     const isRefinement = customPrompt !== null;
     if (!isRefinement && !input.trim() && !attachedFile) return;
@@ -170,6 +171,7 @@ export default function App() {
 
     const isModification = spec.title !== ""; 
 
+    // ✅ [기존 지침 보존] 사용자님이 주신 내용을 절대 수정하지 않았습니다.
     const instructions = `
       당신은 20년 경력의 대한민국 특허청 심사관입니다.
 
@@ -212,14 +214,9 @@ export default function App() {
       { "summary": "...", "drawing_prompts": ["..."], "title": "...", "technical_field": "...", "background": "...", "prior_art_patent": "...", "prior_art_non_patent": "...", "problem": "...", "solution": "...", "effects": "...", "brief_drawings": "...", "detailed_description": "...", "reference_numerals": "...", "claims": ["..."], "abstract": "...", "invention_disclosure": "..." }
     `;
 
-    let promptText = "";
-    if (isRefinement) {
-        promptText = `${instructions}\n [정제 요청]: 연구자가 발명보고서를 다음과 같이 수정했습니다: "${userText}". 이를 반영하여 명세서 전체를 다시 완성하세요.`;
-    } else if (isModification) {
-      promptText = `${instructions}\n [현재 데이터]: ${JSON.stringify(spec)}\n [수정 요청]: "${userText}"\n 위 원칙에 맞춰 수정해주세요.`;
-    } else {
-      promptText = `${instructions}\n [분석 대상]: "${userText}"\n 위 원칙에 맞춰 작성하세요.`;
-    }
+    let promptText = isRefinement 
+      ? `${instructions}\n [정제 요청]: 연구자가 발명보고서를 수정했습니다: "${userText}". 이를 반영하여 명세서 전체를 다시 완성하세요.`
+      : `${instructions}\n [분석 대상]: "${userText}"\n 위 원칙에 맞춰 명세서와 보고서를 작성하세요.`;
 
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -234,10 +231,9 @@ export default function App() {
 
       const data = await response.json();
 
-      // 🛡️ [오류 해결] 'parts' 읽기 전 방어적 체크 추가
+      // 🛡️ [parts 에러 해결] 데이터 방어 체크
       if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content || !data.candidates[0].content.parts) {
-        const reason = data.candidates?.[0]?.finishReason || "차단됨";
-        throw new Error(`AI가 응답을 생성할 수 없습니다 (사유: ${reason}). 아이디어를 조금 더 구체적으로 적어주세요.`);
+        throw new Error("AI 응답이 차단되었습니다. 아이디어를 조금 더 구체적으로 설명해주세요.");
       }
 
       let rawText = data.candidates[0].content.parts[0].text;
@@ -271,9 +267,7 @@ export default function App() {
         setDisclosureDraft(newSpec.invention_disclosure);
         setMessages(prev => [...prev, { role: 'bot', content: isRefinement ? "✨ 수정 내용이 반영되었습니다." : `✅ 작성이 완료되었습니다.` }]);
         if (isRefinement) setViewMode('spec');
-      } catch (e) {
-        throw new Error("데이터 구조를 분석하는 중 오류가 발생했습니다. 다시 시도해 주세요.");
-      }
+      } catch (e) { throw new Error("데이터 구조 분석 실패. 다시 시도해 주세요."); }
 
     } catch (error) {
       setMessages(prev => [...prev, { role: 'bot', content: `⚠️ 오류: ${error.message}` }]);
@@ -299,7 +293,6 @@ export default function App() {
 
   return (
     <div className="flex flex-col lg:flex-row h-screen w-full bg-slate-100 font-sans overflow-hidden">
-      {/* 왼쪽 채팅창 */}
       <div className="w-full lg:w-[40%] h-[40%] lg:h-full flex flex-col border-r border-slate-300 bg-white">
         <div className="p-4 border-b bg-indigo-900 text-white flex justify-between items-center shadow-md">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="text-xl font-bold">MAM-i Builder Pro</h1></div>
@@ -314,16 +307,15 @@ export default function App() {
           {isGenerating && <div className="flex justify-start"><div className="bg-white border p-3 rounded-2xl flex items-center gap-2 text-slate-500 text-sm"><Loader2 className="animate-spin" size={16}/> 작업 중...</div></div>}
         </div>
         <div className="p-3 lg:p-6 border-t bg-white flex items-center gap-3">
-          <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600"><Paperclip size={20}/></button>
-          <button onClick={() => drawingInputRef.current?.click()} className="p-2 text-slate-400 hover:text-green-600"><ImageIcon size={20}/></button>
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+          <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600 transition-all"><Paperclip size={20}/></button>
+          <button onClick={() => drawingInputRef.current?.click()} className="p-2 text-slate-400 hover:text-green-600 transition-all"><ImageIcon size={20}/></button>
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,.doc,.docx,.txt" />
           <input type="file" ref={drawingInputRef} onChange={handleDrawingUpload} className="hidden" accept="image/*" />
           <input className="flex-1 p-3 text-sm border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 !bg-white !text-slate-900" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder="아이디어 입력..." disabled={isGenerating} />
           <button onClick={() => handleSend()} className="p-3 bg-indigo-700 text-white rounded-xl hover:bg-indigo-800" disabled={isGenerating}><Send size={18}/></button>
         </div>
       </div>
 
-      {/* 오른쪽 뷰어 */}
       <div className="w-full lg:w-[60%] h-[60%] lg:h-full overflow-y-auto bg-slate-200 flex flex-col items-center">
         <div className="w-full flex justify-between items-center p-4 lg:p-6 shrink-0">
            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-300">
@@ -333,18 +325,18 @@ export default function App() {
            <div className="flex gap-2">
              <button onClick={handleReset} className="px-3 py-2 bg-slate-500 text-white rounded-lg text-xs font-bold flex items-center gap-1"><RotateCcw size={14}/> 새로 작성</button>
              {viewMode === 'disclosure' ? (
-                <button onClick={() => handleSend(disclosureDraft)} className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 shadow-lg flex items-center gap-2 animate-pulse"><Sparkles size={16}/> [수정 내용 반영하기]</button>
+                <button onClick={() => handleSend(disclosureDraft)} className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-pulse"><Sparkles size={16}/> [수정 내용 반영하기]</button>
              ) : (
                 <button onClick={handleDownload} className="px-4 py-2 bg-blue-700 text-white rounded-xl text-sm font-bold hover:bg-blue-800 shadow-md flex items-center gap-2"><FileText size={16}/> 워드 저장</button>
              )}
            </div>
         </div>
 
-        <div className="w-full bg-white shadow-xl border border-slate-300 p-6 lg:p-16 min-h-screen mb-10 font-sans leading-relaxed text-slate-900">
+        <div className="w-full bg-white shadow-xl border border-slate-300 p-6 lg:p-16 min-h-screen mb-10 text-slate-900 text-justify leading-relaxed">
           {viewMode === 'spec' ? (
             <>
               <h1 className="text-xl font-bold mb-8 border-b-2 border-black pb-1 text-center">【명세서】</h1>
-              <div className="space-y-6 text-justify">
+              <div className="space-y-6">
                 <section>
                   <h2 className="font-bold mb-2">【발명(고안)의 설명】</h2>
                   <div className="mb-3"><h3 className="font-bold pl-2">【발명(고안)의 명칭】</h3><p className="pl-6 text-indigo-800 font-bold">{cleanText(spec.title)}</p></div>
