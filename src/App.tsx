@@ -25,7 +25,6 @@ export default function App() {
   const [viewMode, setViewMode] = useState('spec'); 
   const [disclosureDraft, setDisclosureDraft] = useState('');
 
-  // 명세서 상태
   const [spec, setSpec] = useState({ 
     title: '', technical_field: '', background: '', prior_art_patent: '', 
     prior_art_non_patent: '', problem: '', solution: '', effects: '', 
@@ -157,7 +156,7 @@ export default function App() {
     }
   };
 
-  // === 메인 생성 및 정제 로직 (오류 해결 지점) ===
+  // === 메인 생성 및 정제 로직 (에러 해결 지점) ===
   const handleSend = async (customPrompt = null) => {
     const isRefinement = customPrompt !== null;
     if (!isRefinement && !input.trim() && !attachedFile) return;
@@ -171,7 +170,6 @@ export default function App() {
 
     const isModification = spec.title !== ""; 
 
-    // 기존의 명세서 작성 원칙 (절대 수정 금지 구역)
     const instructions = `
       당신은 20년 경력의 대한민국 특허청 심사관입니다.
 
@@ -216,11 +214,11 @@ export default function App() {
 
     let promptText = "";
     if (isRefinement) {
-        promptText = `${instructions}\n [정제 요청]: 연구자가 발명보고서를 다음과 같이 수정했습니다: "${userText}". 이 기술적 수정을 반영하여 명세서 전체를 다시 완성하세요.`;
+        promptText = `${instructions}\n [정제 요청]: 연구자가 발명보고서를 다음과 같이 수정했습니다: "${userText}". 이를 반영하여 명세서 전체를 다시 완성하세요.`;
     } else if (isModification) {
-      promptText = `${instructions}\n [현재 데이터]: ${JSON.stringify(spec)}\n [수정 요청]: "${userText}"\n 위 원칙에 맞춰 수정하고 요약해주세요.`;
+      promptText = `${instructions}\n [현재 데이터]: ${JSON.stringify(spec)}\n [수정 요청]: "${userText}"\n 위 원칙에 맞춰 수정해주세요.`;
     } else {
-      promptText = `${instructions}\n [분석 대상]: "${userText}"\n 위 원칙에 맞춰 명세서와 보고서를 작성하세요.`;
+      promptText = `${instructions}\n [분석 대상]: "${userText}"\n 위 원칙에 맞춰 작성하세요.`;
     }
 
     try {
@@ -235,9 +233,14 @@ export default function App() {
       });
 
       const data = await response.json();
+
+      // 🛡️ [오류 해결] 'parts' 읽기 전 방어적 체크 추가
+      if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content || !data.candidates[0].content.parts) {
+        const reason = data.candidates?.[0]?.finishReason || "차단됨";
+        throw new Error(`AI가 응답을 생성할 수 없습니다 (사유: ${reason}). 아이디어를 조금 더 구체적으로 적어주세요.`);
+      }
+
       let rawText = data.candidates[0].content.parts[0].text;
-      
-      // 🛠️ JSON 파싱 오류 해결을 위한 정밀 추출 로직
       const jsonStart = rawText.indexOf('{');
       const jsonEnd = rawText.lastIndexOf('}') + 1;
       const jsonString = rawText.substring(jsonStart, jsonEnd);
@@ -266,10 +269,10 @@ export default function App() {
 
         setSpec(newSpec);
         setDisclosureDraft(newSpec.invention_disclosure);
-        setMessages(prev => [...prev, { role: 'bot', content: isRefinement ? "✨ 수정 내용이 명세서에 반영되었습니다." : `✅ 작성이 완료되었습니다.` }]);
+        setMessages(prev => [...prev, { role: 'bot', content: isRefinement ? "✨ 수정 내용이 반영되었습니다." : `✅ 작성이 완료되었습니다.` }]);
         if (isRefinement) setViewMode('spec');
       } catch (e) {
-        throw new Error("JSON 파싱에 실패했습니다. 내용을 조금 더 짧게 입력하시거나 다시 시도해 주세요.");
+        throw new Error("데이터 구조를 분석하는 중 오류가 발생했습니다. 다시 시도해 주세요.");
       }
 
     } catch (error) {
@@ -280,15 +283,14 @@ export default function App() {
     }
   };
 
-  // === UI 영역 (기존 스타일 유지) ===
   if (!isAuthenticated) {
     return (
       <div className="flex min-h-screen w-full bg-slate-100 items-center justify-center font-sans p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200">
+        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border">
           <div className="flex flex-col items-center mb-8"><div className="bg-indigo-100 p-4 rounded-full mb-4"><Lock size={32} className="text-indigo-700" /></div><h1 className="text-2xl font-bold">MAM-i Builder Pro</h1></div>
           <form onSubmit={handleLogin} className="space-y-4">
             <input type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} placeholder="비밀번호" className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 !bg-white !text-slate-900" autoFocus />
-            <button type="submit" className="w-full bg-indigo-700 text-white font-bold p-3 rounded-xl">접속하기</button>
+            <button type="submit" className="w-full bg-indigo-700 text-white font-bold p-3 rounded-xl hover:bg-indigo-800 transition-all shadow-md">접속하기</button>
           </form>
         </div>
       </div>
@@ -299,14 +301,14 @@ export default function App() {
     <div className="flex flex-col lg:flex-row h-screen w-full bg-slate-100 font-sans overflow-hidden">
       {/* 왼쪽 채팅창 */}
       <div className="w-full lg:w-[40%] h-[40%] lg:h-full flex flex-col border-r border-slate-300 bg-white">
-        <div className="p-4 border-b bg-indigo-900 text-white flex justify-between items-center">
+        <div className="p-4 border-b bg-indigo-900 text-white flex justify-between items-center shadow-md">
           <div className="flex items-center gap-2"><Bot size={24}/> <h1 className="text-xl font-bold">MAM-i Builder Pro</h1></div>
-          <span className="text-[10px] bg-indigo-800 px-2 py-1 rounded-full font-bold uppercase">{validModelName ? "System Ready" : "Loading"}</span>
+          <span className="text-[10px] bg-indigo-800 px-2 py-1 rounded-full border font-bold uppercase">{validModelName ? "System Ready" : "Loading"}</span>
         </div>
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4 bg-slate-50">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border'}`}>{msg.content}</div>
+              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}`}>{msg.content}</div>
             </div>
           ))}
           {isGenerating && <div className="flex justify-start"><div className="bg-white border p-3 rounded-2xl flex items-center gap-2 text-slate-500 text-sm"><Loader2 className="animate-spin" size={16}/> 작업 중...</div></div>}
@@ -317,32 +319,32 @@ export default function App() {
           <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
           <input type="file" ref={drawingInputRef} onChange={handleDrawingUpload} className="hidden" accept="image/*" />
           <input className="flex-1 p-3 text-sm border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 !bg-white !text-slate-900" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder="아이디어 입력..." disabled={isGenerating} />
-          <button onClick={() => handleSend()} className="p-3 bg-indigo-700 text-white rounded-xl" disabled={isGenerating}><Send size={18}/></button>
+          <button onClick={() => handleSend()} className="p-3 bg-indigo-700 text-white rounded-xl hover:bg-indigo-800" disabled={isGenerating}><Send size={18}/></button>
         </div>
       </div>
 
-      {/* 오른쪽 미리보기 */}
+      {/* 오른쪽 뷰어 */}
       <div className="w-full lg:w-[60%] h-[60%] lg:h-full overflow-y-auto bg-slate-200 flex flex-col items-center">
         <div className="w-full flex justify-between items-center p-4 lg:p-6 shrink-0">
-           <div className="flex bg-white p-1 rounded-xl border border-slate-300 shadow-sm">
-             <button onClick={() => setViewMode('spec')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${viewMode === 'spec' ? 'bg-indigo-700 text-white' : 'text-slate-500'}`}><Scroll size={14}/> 명세서 보기</button>
-             <button onClick={() => setViewMode('disclosure')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${viewMode === 'disclosure' ? 'bg-indigo-700 text-white' : 'text-slate-500'}`}><Edit3 size={14}/> 발명보고서 편집</button>
+           <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-300">
+             <button onClick={() => setViewMode('spec')} className={`px-4 py-2 rounded-lg text-xs lg:text-sm font-bold transition-all flex items-center gap-2 ${viewMode === 'spec' ? 'bg-indigo-700 text-white' : 'text-slate-500 hover:bg-slate-100'}`}><Scroll size={14}/> 명세서 보기</button>
+             <button onClick={() => setViewMode('disclosure')} className={`px-4 py-2 rounded-lg text-xs lg:text-sm font-bold transition-all flex items-center gap-2 ${viewMode === 'disclosure' ? 'bg-indigo-700 text-white' : 'text-slate-500 hover:bg-slate-100'}`}><Edit3 size={14}/> 발명보고서 편집</button>
            </div>
            <div className="flex gap-2">
              <button onClick={handleReset} className="px-3 py-2 bg-slate-500 text-white rounded-lg text-xs font-bold flex items-center gap-1"><RotateCcw size={14}/> 새로 작성</button>
              {viewMode === 'disclosure' ? (
-                <button onClick={() => handleSend(disclosureDraft)} className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-pulse"><Sparkles size={16}/> [수정 내용 반영하기]</button>
+                <button onClick={() => handleSend(disclosureDraft)} className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 shadow-lg flex items-center gap-2 animate-pulse"><Sparkles size={16}/> [수정 내용 반영하기]</button>
              ) : (
-                <button onClick={handleDownload} className="px-4 py-2 bg-blue-700 text-white rounded-xl text-sm font-bold flex items-center gap-2"><FileText size={16}/> 워드 저장</button>
+                <button onClick={handleDownload} className="px-4 py-2 bg-blue-700 text-white rounded-xl text-sm font-bold hover:bg-blue-800 shadow-md flex items-center gap-2"><FileText size={16}/> 워드 저장</button>
              )}
            </div>
         </div>
 
-        <div className="w-full bg-white shadow-xl border border-slate-300 p-6 lg:p-16 min-h-screen mb-10 text-slate-900 text-justify leading-relaxed">
+        <div className="w-full bg-white shadow-xl border border-slate-300 p-6 lg:p-16 min-h-screen mb-10 font-sans leading-relaxed text-slate-900">
           {viewMode === 'spec' ? (
             <>
               <h1 className="text-xl font-bold mb-8 border-b-2 border-black pb-1 text-center">【명세서】</h1>
-              <div className="space-y-6">
+              <div className="space-y-6 text-justify">
                 <section>
                   <h2 className="font-bold mb-2">【발명(고안)의 설명】</h2>
                   <div className="mb-3"><h3 className="font-bold pl-2">【발명(고안)의 명칭】</h3><p className="pl-6 text-indigo-800 font-bold">{cleanText(spec.title)}</p></div>
@@ -380,20 +382,6 @@ export default function App() {
                   <h2 className="font-bold mb-4">【요약서】</h2>
                   <div className="mb-3"><h3 className="font-bold pl-2">【요약】</h3><p className="pl-6 whitespace-pre-wrap">{cleanText(spec.abstract)}</p></div>
                 </section>
-                {drawings.length > 0 && (
-                  <section className="mt-12 border-t-4 border-black pt-10">
-                    <h2 className="text-center text-xl font-bold mb-10">【도 면】</h2>
-                    <div className="flex flex-col items-center gap-12">
-                      {drawings.map((d, index) => (
-                        <div key={d.id} className="flex flex-col items-center w-full group relative">
-                          <h3 className="font-bold mb-4 text-lg">【도 {index + 1}】</h3>
-                          <img src={d.src} className="max-w-full border border-slate-300" />
-                          <button onClick={() => removeDrawing(d.id)} className="absolute top-10 right-4 bg-red-500 text-white p-2 rounded-full opacity-0 group-hover:opacity-100"><Trash2 size={18}/></button>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
               </div>
             </>
           ) : (
